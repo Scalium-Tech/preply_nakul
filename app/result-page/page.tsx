@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useInterview } from "@/app/context/InterviewContext";
-import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, BarChart3, BookOpen, Download, MessageSquare, ThumbsUp, AlertCircle, TrendingUp } from "lucide-react";
+import { useSubscription } from "@/app/context/SubscriptionContext";
+import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, BarChart3, BookOpen, Download, MessageSquare, ThumbsUp, AlertCircle, TrendingUp, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { m as motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 export default function InterviewResultsPage() {
     const router = useRouter();
     const { questions, answers, setup, report, setReport, resetInterview } = useInterview();
+    const { isPro } = useSubscription();
     const [isLoading, setIsLoading] = useState(true);
     const processedRef = useRef(false);
 
@@ -310,14 +312,26 @@ export default function InterviewResultsPage() {
                         <Download className="mr-2 w-5 h-5" />
                         Download Report
                     </Button>
-                    <Button
-                        onClick={handleRestart}
-                        size="lg"
-                        className="h-14 px-8 text-lg font-bold bg-gray-900 text-white hover:bg-gray-800 rounded-2xl shadow-xl hover:shadow-2xl transition-all"
-                    >
-                        <RefreshCw className="mr-2 w-5 h-5" />
-                        Start New Simulation
-                    </Button>
+                    {/* Conditional Action Button */}
+                    {!isPro ? (
+                        <Button
+                            onClick={() => router.push("/pricing")}
+                            size="lg"
+                            className="h-14 px-8 text-lg font-bold bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-700 hover:to-purple-700 rounded-2xl shadow-xl hover:shadow-2xl hover:-translate-y-1 transition-all"
+                        >
+                            <Zap className="mr-2 w-5 h-5" />
+                            Start Simulation
+                        </Button>
+                    ) : (
+                        <Button
+                            onClick={handleRestart}
+                            size="lg"
+                            className="h-14 px-8 text-lg font-bold bg-gray-900 text-white hover:bg-gray-800 rounded-2xl shadow-xl hover:shadow-2xl transition-all"
+                        >
+                            <RefreshCw className="mr-2 w-5 h-5" />
+                            Start New Simulation
+                        </Button>
+                    )}
                 </div>
             </div>
         </div>
