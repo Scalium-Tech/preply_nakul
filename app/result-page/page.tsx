@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useInterview } from "@/app/context/InterviewContext";
-import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, BarChart3, BookOpen, Download, MessageSquare, ThumbsUp, AlertCircle, TrendingUp } from "lucide-react";
+import { useSubscription } from "@/app/context/SubscriptionContext";
+import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, BarChart3, BookOpen, Download, MessageSquare, ThumbsUp, AlertCircle, TrendingUp, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { m as motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 export default function InterviewResultsPage() {
     const router = useRouter();
     const { questions, answers, setup, report, setReport, resetInterview } = useInterview();
+    const { isPro, loading: subLoading } = useSubscription();
     const [isLoading, setIsLoading] = useState(true);
     const processedRef = useRef(false);
 
@@ -96,6 +98,13 @@ export default function InterviewResultsPage() {
     }, [questions, answers, report, setup, router, setReport]);
 
     const handleRestart = () => {
+        // Check if user has a paid subscription
+        if (!isPro) {
+            // Free users get redirected to pricing page
+            router.push("/pricing?upgrade=simulation");
+            return;
+        }
+        // Pro users can start a new simulation
         resetInterview();
         router.push("/interview-setup");
     };
@@ -313,10 +322,24 @@ export default function InterviewResultsPage() {
                     <Button
                         onClick={handleRestart}
                         size="lg"
-                        className="h-14 px-8 text-lg font-bold bg-gray-900 text-white hover:bg-gray-800 rounded-2xl shadow-xl hover:shadow-2xl transition-all"
+                        className={cn(
+                            "h-14 px-8 text-lg font-bold rounded-2xl shadow-xl hover:shadow-2xl transition-all",
+                            isPro
+                                ? "bg-gray-900 text-white hover:bg-gray-800"
+                                : "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white"
+                        )}
                     >
-                        <RefreshCw className="mr-2 w-5 h-5" />
-                        Start New Simulation
+                        {isPro ? (
+                            <>
+                                <RefreshCw className="mr-2 w-5 h-5" />
+                                Start New Simulation
+                            </>
+                        ) : (
+                            <>
+                                <Crown className="mr-2 w-5 h-5" />
+                                Upgrade to Pro
+                            </>
+                        )}
                     </Button>
                 </div>
             </div>
