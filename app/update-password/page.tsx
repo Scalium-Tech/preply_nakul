@@ -26,24 +26,47 @@ export default function UpdatePasswordPage() {
             const hash = window.location.hash.substring(1);
             const params = new URLSearchParams(hash);
             return {
+                access_token: params.get("access_token"),
+                refresh_token: params.get("refresh_token"),
+                type: params.get("type"),
                 error: params.get("error"),
                 error_description: params.get("error_description"),
                 error_code: params.get("error_code")
             };
         };
 
+        const hashParams = getHashParams();
+
+        // Handle recovery tokens from hash (password reset flow)
+        if (hashParams.type === "recovery" && hashParams.access_token) {
+            supabase.auth.setSession({
+                access_token: hashParams.access_token,
+                refresh_token: hashParams.refresh_token || "",
+            }).then(({ data, error: sessionError }) => {
+                if (sessionError) {
+                    console.error("Session error:", sessionError);
+                    setError(sessionError.message);
+                    setIsLinkExpired(true);
+                } else if (data.user) {
+                    setEmail(data.user.email || null);
+                    // Clear hash from URL for cleaner look
+                    window.history.replaceState(null, "", window.location.pathname);
+                }
+                setLoading(false);
+            });
+            return;
+        }
+
         // Check for error parameters in the URL (query params or hash)
         const queryErrorParam = searchParams.get("error");
         const queryErrorCode = searchParams.get("error_code");
         const queryErrorDescription = searchParams.get("error_description");
 
-        const hashParams = getHashParams();
-
         const errorParam = queryErrorParam || hashParams.error;
         const errorCode = queryErrorCode || hashParams.error_code;
         const errorDescription = queryErrorDescription || hashParams.error_description?.replace(/\+/g, ' ');
 
-        if (errorParam || errorCode === "otp_expired") {
+        if (errorParam || errorCode === "otp_expired" || errorCode === "pkce_code_verifier_not_found") {
             setError(errorDescription || "Your password reset link is invalid or has expired.");
             setIsLinkExpired(true);
             setLoading(false);
