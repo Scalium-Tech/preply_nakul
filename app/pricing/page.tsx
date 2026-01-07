@@ -42,7 +42,7 @@ const PRO_PRICING = {
 export default function PricingPage() {
     const router = useRouter();
     const { user, loading: authLoading } = useAuth();
-    const { isPro, loading: subLoading, interviewsTaken, refreshSubscription } = useSubscription();
+    const { isPro, loading: subLoading, interviewsTaken, refreshSubscription, subscription } = useSubscription();
     const [isYearly, setIsYearly] = useState(false);
     const [showPopup, setShowPopup] = useState(false);
 
@@ -76,8 +76,18 @@ export default function PricingPage() {
             return;
         }
 
-        if (isPro) {
-            // Already Pro, maybe redirect to billing settings or just dashboard
+        // Check if user is strictly blocked (e.g., already on Yearly, or on Monthly but trying to buy Monthly again)
+        const isYearlyPlan = subscription?.billingCycle === 'yearly';
+
+        if (isPro && isYearlyPlan) {
+            router.push("/interview-setup");
+            return;
+        }
+
+        const isUpgrade = subscription?.billingCycle === 'monthly' && isYearly;
+
+        if (isPro && !isUpgrade) {
+            // Already Pro and not upgrading (Monthly -> Monthly)
             router.push("/dashboard");
             return;
         }
@@ -237,7 +247,7 @@ export default function PricingPage() {
                         {/* CTA Button */}
                         <button
                             onClick={handleProPlan}
-                            disabled={isPaymentLoading}
+                            disabled={isPaymentLoading || (isPro && subscription?.billingCycle === 'monthly' && !isYearly)}
                             className="w-full py-4 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             {isPaymentLoading ? (
@@ -246,7 +256,13 @@ export default function PricingPage() {
                                     Processing...
                                 </>
                             ) : isPro ? (
-                                "Extend Plan"
+                                subscription?.billingCycle === 'yearly' ? (
+                                    "Start Interview"
+                                ) : subscription?.billingCycle === 'monthly' && isYearly ? (
+                                    "Upgrade Plan"
+                                ) : (
+                                    "Current Plan"
+                                )
                             ) : (
                                 "Upgrade to Pro"
                             )}

@@ -60,17 +60,23 @@ export async function POST(request: NextRequest) {
         // Idempotency: Check if user is already Pro
         const { data: existingSub } = await supabaseAdmin
             .from("subscriptions")
-            .select("status, expires_at")
+            .select("status, expires_at, billing_cycle")
             .eq("user_id", userId)
             .eq("status", "active")
             .single();
 
         if (existingSub) {
-            if (new Date(existingSub.expires_at) > new Date()) {
-                return NextResponse.json(
-                    { error: "You already have an active Pro subscription." },
-                    { status: 409 }
-                );
+            const isActive = new Date(existingSub.expires_at) > new Date();
+            if (isActive) {
+                // Allow upgrade from Monthly to Yearly
+                const isUpgrade = existingSub.billing_cycle === "monthly" && billingCycle === "yearly";
+
+                if (!isUpgrade) {
+                    return NextResponse.json(
+                        { error: "You already have an active Pro subscription." },
+                        { status: 409 }
+                    );
+                }
             }
         }
 
