@@ -6,44 +6,17 @@ import { useAuth } from "@/app/context/AuthContext";
 import { useSubscription } from "@/app/context/SubscriptionContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import { Check, X, Sparkles, Crown, Loader2 } from "lucide-react";
+import { Check, X, Sparkles, Crown, Loader2, X as CloseIcon } from "lucide-react";
 import { useRazorpayPayment } from "@/hooks/useRazorpayPayment";
 import { toast } from "sonner";
-
-interface PlanFeature {
-    text: string;
-    included: boolean;
-}
-
-// Plan features as per user requirements
-const FREE_FEATURES: PlanFeature[] = [
-    { text: "1 interview (lifetime)", included: true },
-    { text: "1 report download", included: true },
-    { text: "AI-powered feedback", included: true },
-    { text: "Dashboard access", included: true },
-    { text: "Progress tracking", included: true },
-    { text: "Interview history", included: true },
-];
-
-const PRO_FEATURES: PlanFeature[] = [
-    { text: "Everything in Free", included: true },
-    { text: "Unlimited interviews", included: true },
-    { text: "Unlimited report downloads", included: true },
-    { text: "Dashboard access", included: true },
-    { text: "Progress tracking", included: true },
-    { text: "Interview history", included: true },
-];
-
-const PRO_PRICING = {
-    monthly: { amount: 79900, display: "799", period: "/month", billingCycle: "monthly" as const },
-    yearly: { amount: 729900, display: "7,299", period: "/year", billingCycle: "yearly" as const },
-};
+import { paymentConfig, BillingCycle } from "@/lib/config/payments";
 
 export default function PricingPage() {
     const router = useRouter();
     const { user, loading: authLoading } = useAuth();
     const { isPro, loading: subLoading, interviewsTaken, refreshSubscription, subscription } = useSubscription();
-    const [isYearly, setIsYearly] = useState(false);
+    // Use Enum for state to avoid magic string confusion
+    const [selectedCycle, setSelectedCycle] = useState<BillingCycle>(BillingCycle.MONTHLY);
     const [showPopup, setShowPopup] = useState(false);
 
     const { buyPro, isLoading: isPaymentLoading } = useRazorpayPayment({
@@ -70,29 +43,77 @@ export default function PricingPage() {
         router.push("/interview-setup");
     };
 
+    /**
+     * Determines the text to display on the Pro plan button.
+     * Replaces nested ternary logic for better readability.
+     */
+    const getButtonText = () => {
+        if (isPaymentLoading) return null; // Logic handled by loader in JSX
+
+        if (!isPro) return "Upgrade to Pro";
+
+        const currentCycle = subscription?.billingCycle;
+
+        // Use Enums for strict checks
+        if (currentCycle === BillingCycle.YEARLY) {
+            return "Start Interview";
+        }
+
+        if (currentCycle === BillingCycle.MONTHLY && selectedCycle === BillingCycle.YEARLY) {
+            return "Upgrade Plan";
+        }
+
+        return "Current Plan";
+    };
+
+    /**
+     * Handles the logic when the Pro plan button is clicked.
+     * Enforces strict state checks to prevent invalid actions.
+     */
     const handleProPlan = async () => {
         if (!user) {
             router.push("/login?redirect=/pricing");
             return;
         }
 
-        // Check if user is strictly blocked (e.g., already on Yearly, or on Monthly but trying to buy Monthly again)
-        const isYearlyPlan = subscription?.billingCycle === 'yearly';
+        // Safe Access: Ensure subscription is loaded if we are checking against it
+        // However, isPro flag is robust enough for the high-level check
+        if (!isPro) {
+            await buyPro(selectedCycle === BillingCycle.YEARLY);
+            return;
+        }
 
-        if (isPro && isYearlyPlan) {
+        const currentCycle = subscription?.billingCycle;
+
+        // Case 1: Already on Yearly -> Go to Interview
+        if (currentCycle === BillingCycle.YEARLY) {
             router.push("/interview-setup");
             return;
         }
 
-        const isUpgrade = subscription?.billingCycle === 'monthly' && isYearly;
-
-        if (isPro && !isUpgrade) {
-            // Already Pro and not upgrading (Monthly -> Monthly)
-            router.push("/dashboard");
+        // Case 2: On Monthly, wants Yearly -> Upgrade
+        if (currentCycle === BillingCycle.MONTHLY && selectedCycle === BillingCycle.YEARLY) {
+            await buyPro(true); // isYearly = true
             return;
         }
 
-        await buyPro(isYearly);
+        // Case 3: On Monthly, wants Monthly (or any other redundant case) -> Dashboard
+        router.push("/dashboard");
+    };
+
+    // Helper to determine if button should be disabled
+    const isButtonDisabled = () => {
+        if (isPaymentLoading) return true;
+        if (!isPro) return false;
+
+        const currentCycle = subscription?.billingCycle;
+
+        // Disable if viewing the same plan as subscribed (e.g. Monthly view while on Monthly)
+        if (currentCycle === BillingCycle.MONTHLY && selectedCycle === BillingCycle.MONTHLY) return true;
+
+        // Note: Yearly users are never disabled, they get "Start Interview"
+
+        return false;
     };
 
     if (authLoading || subLoading) {
@@ -103,7 +124,7 @@ export default function PricingPage() {
         );
     }
 
-    const currentPrice = isYearly ? PRO_PRICING.yearly : PRO_PRICING.monthly;
+    const currentPlanConfig = paymentConfig.plans[selectedCycle];
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-violet-50/30 via-white to-white">
@@ -153,20 +174,20 @@ export default function PricingPage() {
 
                 {/* Monthly/Yearly Toggle */}
                 <div className="flex items-center justify-center gap-4 mb-12">
-                    <span className={`text-sm font-medium transition-colors ${!isYearly ? "text-gray-900" : "text-gray-400"}`}>
+                    <span className={`text-sm font-medium transition-colors ${selectedCycle === BillingCycle.MONTHLY ? "text-gray-900" : "text-gray-400"}`}>
                         Monthly
                     </span>
                     <button
-                        onClick={() => setIsYearly(!isYearly)}
-                        className={`relative w-14 h-7 rounded-full transition-colors duration-300 ${isYearly ? "bg-violet-600" : "bg-gray-300"
+                        onClick={() => setSelectedCycle(prev => prev === BillingCycle.MONTHLY ? BillingCycle.YEARLY : BillingCycle.MONTHLY)}
+                        className={`relative w-14 h-7 rounded-full transition-colors duration-300 ${selectedCycle === BillingCycle.YEARLY ? "bg-violet-600" : "bg-gray-300"
                             }`}
                     >
                         <span
-                            className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${isYearly ? "translate-x-7" : "translate-x-0"
+                            className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${selectedCycle === BillingCycle.YEARLY ? "translate-x-7" : "translate-x-0"
                                 }`}
                         />
                     </button>
-                    <span className={`text-sm font-medium transition-colors ${isYearly ? "text-gray-900" : "text-gray-400"}`}>
+                    <span className={`text-sm font-medium transition-colors ${selectedCycle === BillingCycle.YEARLY ? "text-gray-900" : "text-gray-400"}`}>
                         Yearly
                     </span>
                 </div>
@@ -186,19 +207,13 @@ export default function PricingPage() {
 
                         {/* Features */}
                         <ul className="space-y-4 mb-8">
-                            {FREE_FEATURES.map((feature, index) => (
+                            {paymentConfig.freeFeatures.map((feature, index) => (
                                 <li key={index} className="flex items-center gap-3">
-                                    {feature.included ? (
-                                        <div className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
-                                            <Check className="w-3 h-3 text-violet-600" />
-                                        </div>
-                                    ) : (
-                                        <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                            <X className="w-3 h-3 text-gray-400" />
-                                        </div>
-                                    )}
-                                    <span className={feature.included ? "text-gray-700" : "text-gray-400"}>
-                                        {feature.text}
+                                    <div className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                                        <Check className="w-3 h-3 text-violet-600" />
+                                    </div>
+                                    <span className="text-gray-700">
+                                        {feature}
                                     </span>
                                 </li>
                             ))}
@@ -227,19 +242,19 @@ export default function PricingPage() {
 
                         {/* Price */}
                         <div className="mb-2">
-                            <span className="text-5xl font-bold text-violet-600">₹{currentPrice.display}</span>
-                            <span className="text-gray-500 ml-1">{currentPrice.period}</span>
+                            <span className="text-5xl font-bold text-violet-600">₹{currentPlanConfig.displayAmount}</span>
+                            <span className="text-gray-500 ml-1">/{selectedCycle === BillingCycle.YEARLY ? 'year' : 'month'}</span>
                         </div>
                         <p className="text-gray-500 text-sm mb-8">For serious growth-seekers</p>
 
                         {/* Features */}
                         <ul className="space-y-4 mb-8">
-                            {PRO_FEATURES.map((feature, index) => (
+                            {currentPlanConfig.features.map((feature, index) => (
                                 <li key={index} className="flex items-center gap-3">
                                     <div className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
                                         <Check className="w-3 h-3 text-violet-600" />
                                     </div>
-                                    <span className="text-gray-700">{feature.text}</span>
+                                    <span className="text-gray-700">{feature}</span>
                                 </li>
                             ))}
                         </ul>
@@ -247,7 +262,7 @@ export default function PricingPage() {
                         {/* CTA Button */}
                         <button
                             onClick={handleProPlan}
-                            disabled={isPaymentLoading || (isPro && subscription?.billingCycle === 'monthly' && !isYearly)}
+                            disabled={isButtonDisabled()}
                             className="w-full py-4 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             {isPaymentLoading ? (
@@ -255,16 +270,8 @@ export default function PricingPage() {
                                     <Loader2 className="w-5 h-5 animate-spin" />
                                     Processing...
                                 </>
-                            ) : isPro ? (
-                                subscription?.billingCycle === 'yearly' ? (
-                                    "Start Interview"
-                                ) : subscription?.billingCycle === 'monthly' && isYearly ? (
-                                    "Upgrade Plan"
-                                ) : (
-                                    "Current Plan"
-                                )
                             ) : (
-                                "Upgrade to Pro"
+                                getButtonText()
                             )}
                         </button>
                     </div>

@@ -1,49 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { createClient } from "@supabase/supabase-js";
-
-// Duration mapping for calculating expiry
-const DURATION_MONTHS: Record<string, number> = {
-    monthly: 1,
-    yearly: 12,
-};
+import { paymentConfig, BillingCycle, SubscriptionStatus } from "@/lib/config/payments";
+import { verifyPaymentSchema } from "@/lib/validations/payments";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { parseAPIError } from "@/lib/utils/api-error";
+import { logger } from "@/lib/utils/logger";
 
 export async function POST(request: NextRequest) {
     try {
+        // Check environment variables (already checked in admin.ts, but fail-fast for Razorpay secret here)
         // Check environment variables
-        if (!process.env.RAZORPAY_KEY_SECRET) {
-            console.error("Razorpay secret not configured");
+        try {
+            paymentConfig.validate();
+        } catch (configError: unknown) {
+            console.error("Configuration Error:", configError);
             return NextResponse.json(
                 { error: "Payment service not configured" },
                 { status: 503 }
             );
         }
 
-        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-            console.error("Supabase credentials not configured");
-            return NextResponse.json(
-                { error: "Database service not configured" },
-                { status: 503 }
-            );
+        let body;
+        try {
+            body = await request.json();
+        } catch (e) {
+            return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
         }
 
-        // Initialize Supabase inside handler (lazy initialization)
-        const supabaseAdmin = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL,
-            process.env.SUPABASE_SERVICE_ROLE_KEY
-        );
+        const validation = verifyPaymentSchema.safeParse(body);
+
+        if (!validation.success) {
+            return NextResponse.json(
+                { error: "Invalid request data", details: validation.error.format() },
+                { status: 400 }
+            );
+        }
 
         const {
             razorpay_order_id,
             razorpay_payment_id,
             razorpay_signature,
-        } = await request.json();
+        } = validation.data;
 
         // Verify signature
-        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const signatureBody = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
-            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-            .update(body)
+            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+            .update(signatureBody)
             .digest("hex");
 
         if (expectedSignature !== razorpay_signature) {
@@ -68,8 +71,22 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { billing_cycle, user_id } = paymentRecord;
-        const durationMonths = DURATION_MONTHS[billing_cycle] || 1;
+        const billing_cycle = paymentRecord.billing_cycle as BillingCycle;
+        const user_id = paymentRecord.user_id;
+
+        // Single Source of Truth for Duration
+        const planConfig = paymentConfig.plans[billing_cycle];
+
+        // Strict Plan Validation (No Guesswork)
+        if (!planConfig) {
+            console.error(`Critical Data Integrity Error: Plan config missing for cycle ${billing_cycle}`);
+            return NextResponse.json(
+                { error: "Invalid plan configuration detected. Please contact support." },
+                { status: 500 }
+            );
+        }
+
+        const durationMonths = planConfig.durationMonths;
 
         // Fetch current subscription to handle extensions
         const { data: currentSubscription } = await supabaseAdmin
@@ -78,8 +95,12 @@ export async function POST(request: NextRequest) {
             .eq("user_id", user_id)
             .single();
 
-        // Calculate new expiry date
-        let baseDate = new Date(); // Start from "now" by default
+        // Consistent Timestamp
+        const now = new Date();
+        const nowISO = now.toISOString();
+
+        // Calculate new expiry date using UTC to avoid timezone issues
+        let baseDate = new Date(now); // Start from "now" by default
 
         // If user has an active subscription that expires in the future, extend from that date
         if (currentSubscription?.expires_at && new Date(currentSubscription.expires_at) > baseDate) {
@@ -87,7 +108,8 @@ export async function POST(request: NextRequest) {
         }
 
         const expiresAt = new Date(baseDate);
-        expiresAt.setMonth(expiresAt.getMonth() + durationMonths);
+        // UTC Safe Month Addition
+        expiresAt.setUTCMonth(expiresAt.getUTCMonth() + durationMonths);
 
         // Update payment record
         await supabaseAdmin
@@ -95,7 +117,7 @@ export async function POST(request: NextRequest) {
             .update({
                 razorpay_payment_id,
                 razorpay_signature,
-                status: "captured",
+                status: "captured", // Could use an Enum here if PaymentStatus existed
             })
             .eq("razorpay_order_id", razorpay_order_id);
 
@@ -107,10 +129,10 @@ export async function POST(request: NextRequest) {
                     user_id: user_id,
                     plan: "pro",
                     billing_cycle: billing_cycle,
-                    status: "active",
-                    started_at: new Date().toISOString(),
+                    status: SubscriptionStatus.ACTIVE,
+                    started_at: nowISO,
                     expires_at: expiresAt.toISOString(),
-                    updated_at: new Date().toISOString(),
+                    updated_at: nowISO,
                 },
                 {
                     onConflict: "user_id",
@@ -130,8 +152,9 @@ export async function POST(request: NextRequest) {
             message: "Payment verified and subscription activated",
             expiresAt: expiresAt.toISOString(),
         });
-    } catch (error) {
-        console.error("Error verifying payment:", error);
+    } catch (error: unknown) {
+        const safeError = parseAPIError(error);
+        logger.error("Error verifying payment", safeError);
         return NextResponse.json(
             { error: "Failed to verify payment" },
             { status: 500 }

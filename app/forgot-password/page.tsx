@@ -69,7 +69,7 @@ export default function ForgotPasswordPage() {
                             </div>
                             <h3 className="text-lg font-semibold text-gray-900 mb-2">Check your email</h3>
                             <p className="text-gray-600 mb-6">
-                                We've sent a password reset link to <span className="font-medium text-gray-900">{email}</span>
+                                We&apos;ve sent a password reset link to <span className="font-medium text-gray-900">{email}</span>
                             </p>
                             <button
                                 onClick={() => setSuccess(false)}
